@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ball Runner — Futuristic</title>
+<style>
+:root{
+  --bg-day: #87ceeb;
+  --bg-night: #0a0a2a;
+  --ground:#228B22;
+  --accent:#19b559;
+  --accent-light:#4aff88;
+  --ui-bg: rgba(0,0,0,0.6);
+  --ui-color:#00ffea;
+}
+body{
+  margin:0; font-family:'Orbitron', Arial, sans-serif; overflow:hidden; background:var(--bg-day);
+}
+#gameCanvas{
+  display:block; margin:0 auto; background:transparent;
+}
+#ui{
+  position:absolute; top:15px; left:15px; font-weight:bold; font-size:22px; color:var(--ui-color);
+  background:var(--ui-bg); padding:8px 12px; border-radius:12px; box-shadow:0 0 25px rgba(0,255,234,0.9);
+  text-shadow:0 0 10px rgba(0,255,234,0.9);
+}
+#menu{
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  text-align:center; background:rgba(0,0,0,0.85); padding:30px; border-radius:20px; 
+  box-shadow:0 12px 60px rgba(0,255,234,0.7);
+  z-index:10; color:var(--ui-color); font-family:'Orbitron', sans-serif;
+}
+#menu h1{ margin:0 0 20px; font-size:36px; text-shadow:0 0 18px rgba(0,255,234,0.9);}
+#menu button{
+  padding:12px 25px; font-size:18px; margin:10px; cursor:pointer; border:none; border-radius:12px;
+  background:linear-gradient(45deg,var(--accent),var(--accent-light));
+  color:black; font-weight:bold; box-shadow:0 6px 25px rgba(0,255,234,0.7);
+  transition: all 0.2s ease;
+}
+#menu button:hover{
+  transform:scale(1.05);
+  box-shadow:0 10px 35px rgba(0,255,234,0.9);
+}
+</style>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<canvas id="gameCanvas" width="900" height="360"></canvas>
+<div id="ui">Score: <span id="score">0</span></div>
+<div id="menu">
+  <h1>🌟 Ball Runner 🌟</h1>
+  <button id="startBtn">Start Game</button>
+</div>
+
+<audio id="audioJump" src="https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg" preload="auto"></audio>
+<audio id="audioGameOver" src="https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg" preload="auto"></audio>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const menu = document.getElementById('menu');
+const startBtn = document.getElementById('startBtn');
+const audioJump = document.getElementById('audioJump');
+const audioGameOver = document.getElementById('audioGameOver');
+
+const CANVAS_W=900, CANVAS_H=360;
+canvas.width=CANVAS_W; canvas.height=CANVAS_H;
+
+let running=false, score=0, frame=0, speed=6, dayBlend=1;
+const groundY = CANVAS_H-60;
+const ball = { x:80, y:groundY-20, r:20, vy:0, grounded:true, trail:[] };
+let obstacles=[], clouds=[];
+
+// Cloud spawn
+function spawnCloud(x, layer=1){
+  clouds.push({
+    x:x!==undefined?x:CANVAS_W+Math.random()*300, 
+    y:30+Math.random()*60, 
+    w:60+Math.random()*80, 
+    speed:(0.2+Math.random()*0.3)*layer,
+    layer:layer
+  });
+}
+for(let i=0;i<4;i++) spawnCloud(-i*200, 0.5+Math.random()*1.5);
+
+// Reset game
+function resetGame(){
+  score=0; frame=0; speed=6; dayBlend=1;
+  ball.y=groundY-ball.r; ball.vy=0; ball.grounded=true; ball.trail=[];
+  obstacles=[]; clouds=[]; 
+  for(let i=0;i<4;i++) spawnCloud(-i*220-Math.random()*200, 0.5+Math.random()*1.5);
+  scoreEl.textContent='0';
+}
+
+// Jump
+function jump(){
+  if(!running || !ball.grounded) return;
+  ball.vy=-12; ball.grounded=false;
+  try{ audioJump.currentTime=0; audioJump.play(); }catch(e){}
+}
+
+// Spawn obstacle
+function spawnObstacle(){
+  let h = 20+Math.random()*30;
+  let yPos = groundY;
+  const rand = Math.random();
+  if(rand<0.15) yPos -= 180;
+  else if(rand<0.3) yPos -= 100;
+  obstacles.push({x:CANVAS_W+10, y:yPos, w:20, h:h});
+}
+
+// Update
+function update(dt){
+  frame++;
+  score += dt*10; scoreEl.textContent=Math.floor(score);
+
+  // Ball physics
+  ball.vy += 0.6; ball.y += ball.vy;
+  if(ball.y >= groundY-ball.r){ ball.y = groundY-ball.r; ball.vy=0; ball.grounded=true; }
+
+  // Ball trail
+  ball.trail.push({x:ball.x, y:ball.y, alpha:1});
+  if(ball.trail.length>20) ball.trail.shift();
+  ball.trail.forEach(p=>p.alpha-=0.05);
+
+  // Obstacles
+  if(frame%90===0) spawnObstacle();
+  obstacles.forEach(o=>o.x-=speed);
+  obstacles = obstacles.filter(o=>o.x+o.w>0);
+
+  // Clouds
+  clouds.forEach(c=>c.x-=c.speed);
+  clouds.forEach((c,i)=>{ if(c.x+c.w<0){ clouds.splice(i,1); spawnCloud(undefined, c.layer); }});
+
+  // Collision
+  for(let o of obstacles){
+    const closestX = Math.max(o.x, Math.min(ball.x, o.x + o.w));
+    const closestY = Math.max(o.y - o.h, Math.min(ball.y, o.y));
+    const dx = ball.x - closestX;
+    const dy = ball.y - closestY;
+    if(Math.sqrt(dx*dx + dy*dy) < ball.r){
+      running=false;
+      menu.style.display='block';
+      menu.querySelector('h1').textContent='Game Over — Score: '+Math.floor(score);
+      startBtn.textContent='Play Again';
+      try{ audioGameOver.currentTime=0; audioGameOver.play(); }catch(e){}
+    }
+  }
+
+  if(frame%300===0) speed+=0.2;
+  dayBlend=0.5+0.5*Math.sin(frame*0.002);
+}// Draw
+function draw(){
+  // Sky
+  const grad = ctx.createLinearGradient(0,0,0,CANVAS_H);
+  const r = 135*dayBlend, g=206*dayBlend, b=235*dayBlend;
+  grad.addColorStop(0,`rgba(${r},${g},${b},1)`);
+  grad.addColorStop(1,`rgba(${224*dayBlend},${247*dayBlend},${250*dayBlend},1)`);
+  ctx.fillStyle=grad; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
+
+  // Clouds
+  clouds.forEach(c=>{
+    ctx.fillStyle=`rgba(255,255,255,${0.3+c.layer*0.4})`;
+    ctx.beginPath(); 
+    ctx.ellipse(c.x,c.y,c.w/2,15+5*c.layer,0,0,Math.PI*2); 
+    ctx.fill(); 
+  });
+
+  // Ground
+  ctx.fillStyle='var(--ground)';
+  ctx.fillRect(0,groundY,CANVAS_W,CANVAS_H-groundY);
+
+  // Obstacles
+  obstacles.forEach(o=>{
+    ctx.fillStyle='red';
+    ctx.shadowColor = 'rgba(255,0,0,0.7)';
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.moveTo(o.x,o.y);
+    ctx.lineTo(o.x+o.w,o.y);
+    ctx.lineTo(o.x+o.w/2,o.y-o.h);
+    ctx.closePath();
+    ctx.fill();
+  });
+  ctx.shadowBlur=0;
+
+  // Ball trail
+  ball.trail.forEach(p=>{
+    ctx.fillStyle = `rgba(76, 175, 80, ${p.alpha})`;
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,ball.r*0.9,0,Math.PI*2);
+    ctx.fill();
+  });
+
+  // Ball
+  ctx.fillStyle='#4caf50';
+  ctx.shadowColor='rgba(76,175,80,0.8)';
+  ctx.shadowBlur=20;
+  ctx.beginPath();
+  ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);
+  ctx.fill();
+  ctx.shadowBlur=0;
+}
+
+// Game loop
+let lastTime=0;
+function loop(ts){
+  if(!running) return;
+
+  const dt = Math.min(0.05,(ts-lastTime)/1000);
+  lastTime=ts;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// Start game
+function startGame(){
+  resetGame();
+  running=true;
+  menu.style.display='none';
+  menu.querySelector('h1').textContent='🌟 Ball Runner 🌟';
+  startBtn.textContent='Start Game';
+  lastTime=performance.now();
+  requestAnimationFrame(loop);
+}
+
+// Event listeners
+startBtn.addEventListener('click', startGame);
+
+window.addEventListener('keydown', e=>{ 
+  if(e.code==='Space'){ 
+    if(!running){ startGame(); } 
+    jump(); 
+  } 
+});
+
+window.addEventListener('touchstart', e=>{ 
+  if(!running){ startGame(); } 
+  jump(); 
+}, {passive:false});
+</script>
+</body>
+</html>
